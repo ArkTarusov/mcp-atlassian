@@ -3561,6 +3561,33 @@ async def test_download_attachments_image_still_uses_embedded_resource(
     assert resource_content.resource.mimeType == "image/png"
 
 
+@pytest.mark.anyio
+async def test_download_attachments_to_target_dir(jira_client, mock_jira_fetcher):
+    """With target_dir the fetcher saves the files and its summary is returned."""
+    saved = {
+        "success": True,
+        "issue_key": "TEST-123",
+        "total": 1,
+        "downloaded": [
+            {"filename": "build.log", "path": "/files/TEST-123/build.log", "size": 9}
+        ],
+        "failed": [],
+    }
+    mock_jira_fetcher.download_issue_attachments.return_value = saved
+
+    response = await jira_client.call_tool(
+        "jira_download_attachments",
+        {"issue_key": "TEST-123", "target_dir": "TEST-123"},
+    )
+
+    assert len(response.content) == 1
+    assert json.loads(response.content[0].text) == saved
+    mock_jira_fetcher.download_issue_attachments.assert_called_once_with(
+        issue_key="TEST-123", target_dir="TEST-123"
+    )
+    mock_jira_fetcher.get_issue_attachment_contents.assert_not_called()
+
+
 # ── jira_get_issue_images tests ──────────────────────────────────────
 
 

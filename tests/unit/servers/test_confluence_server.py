@@ -1869,6 +1869,102 @@ async def test_download_attachment_stopped_at_limit_reports_bytes_read(
     assert "larger than the 50 MB inline limit" in result["error"]
 
 
+def _mock_single_attachment(mock_confluence_fetcher) -> None:
+    mock_confluence_fetcher._v2_adapter = MagicMock()
+    mock_confluence_fetcher._v2_adapter.get_attachment_by_id.return_value = {
+        "title": "build.log",
+        "extensions": {"mediaType": "text/plain", "fileSize": 9},
+        "_links": {"download": "/download/attachments/123/build.log"},
+    }
+    mock_confluence_fetcher._resolve_attachment_download_url.return_value = (
+        "https://example.atlassian.net/wiki/download/attachments/123/build.log"
+    )
+
+
+@pytest.mark.anyio
+async def test_download_attachment_to_target_dir(
+    client, mock_confluence_fetcher, monkeypatch, tmp_path
+):
+    """A relative target_dir resolves against the file root; only the path returns."""
+    monkeypatch.setenv("MCP_ATLASSIAN_FILES_DIR", str(tmp_path))
+    _mock_single_attachment(mock_confluence_fetcher)
+
+    def save(url: str, target_path: str) -> bool:
+        with open(target_path, "wb") as file:
+            file.write(b"log lines")
+        return True
+
+    (tmp_path / "attachments").mkdir()
+    mock_confluence_fetcher.download_attachment.side_effect = save
+
+    response = await client.call_tool(
+        "confluence_download_attachment",
+        {"attachment_id": "att123456789", "target_dir": "attachments"},
+    )
+
+    expected_path = tmp_path / "attachments" / "build.log"
+    assert json.loads(response.content[0].text) == {
+        "success": True,
+        "attachment_id": "att123456789",
+        "filename": "build.log",
+        "path": str(expected_path),
+        "size": 9,
+    }
+    mock_confluence_fetcher.download_attachment.assert_called_once_with(
+        "https://example.atlassian.net/wiki/download/attachments/123/build.log",
+        str(expected_path),
+    )
+    mock_confluence_fetcher.fetch_attachment_content.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_download_attachment_to_target_dir_failure(
+    client, mock_confluence_fetcher, tmp_path
+):
+    """A failed save is reported with the target path, not as inline content."""
+    _mock_single_attachment(mock_confluence_fetcher)
+    mock_confluence_fetcher.download_attachment.return_value = False
+
+    response = await client.call_tool(
+        "confluence_download_attachment",
+        {"attachment_id": "att123456789", "target_dir": str(tmp_path)},
+    )
+
+    result = json.loads(response.content[0].text)
+    assert result["success"] is False
+    assert "path" not in result
+    assert str(tmp_path / "build.log") in result["error"]
+
+
+@pytest.mark.anyio
+async def test_download_content_attachments_to_target_dir(
+    client, mock_confluence_fetcher
+):
+    """With target_dir the fetcher saves the files and its summary is returned."""
+    saved = {
+        "success": True,
+        "content_id": "123",
+        "total": 1,
+        "downloaded": [
+            {"filename": "build.log", "path": "/files/123/build.log", "size": 9}
+        ],
+        "failed": [],
+    }
+    mock_confluence_fetcher.download_content_attachments.return_value = saved
+
+    response = await client.call_tool(
+        "confluence_download_content_attachments",
+        {"content_id": "123", "target_dir": "123"},
+    )
+
+    assert len(response.content) == 1
+    assert json.loads(response.content[0].text) == saved
+    mock_confluence_fetcher.download_content_attachments.assert_called_once_with(
+        "123", "123"
+    )
+    mock_confluence_fetcher.get_content_attachments.assert_not_called()
+
+
 @pytest.mark.anyio
 async def test_get_page_images_fetch_failure(client, mock_confluence_fetcher):
     """Test graceful handling when fetch_attachment_content returns None."""

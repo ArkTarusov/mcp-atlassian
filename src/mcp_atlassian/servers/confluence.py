@@ -28,7 +28,7 @@ from mcp_atlassian.servers.scope_guard import CONFLUENCE_SCOPE_POLICY, ToolScope
 from mcp_atlassian.utils.decorators import (
     check_write_access,
 )
-from mcp_atlassian.utils.io import open_confined, validate_safe_path
+from mcp_atlassian.utils.io import get_file_root, open_confined, validate_safe_path
 from mcp_atlassian.utils.media import (
     ATTACHMENT_MAX_BYTES,
     AttachmentBudget,
@@ -45,6 +45,13 @@ _CONFLUENCE_TINY_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,11}")
 _PAGE_ID_PATH_PATTERN = re.compile(r"(?:^|/)pages/([0-9]+)(?:/|$)")
 _TINY_LINK_PATH_PATTERN = re.compile(r"(?:^|/)x/([A-Za-z0-9_-]+)(?:/|$)")
 _MAX_CONFLUENCE_PAGE_ID = (1 << 63) - 1
+
+TARGET_DIR_DESCRIPTION = (
+    "Directory to save the downloaded files to instead of returning their content. "
+    "Relative paths resolve against the server's file root "
+    "(MCP_ATLASSIAN_FILES_DIR, or the working directory when unset); "
+    "absolute paths must lie inside it."
+)
 
 
 def _template_description(template: dict[str, object]) -> str:
@@ -2342,6 +2349,13 @@ async def download_attachment(
             pattern=ATTACHMENT_ID_PATTERN,
         ),
     ],
+    target_dir: Annotated[
+        str | None,
+        Field(
+            description=TARGET_DIR_DESCRIPTION,
+            default=None,
+        ),
+    ] = None,
 ) -> TextContent | EmbeddedResource:
     """Download an attachment from Confluence as an embedded resource.
 
@@ -2350,13 +2364,19 @@ async def download_attachment(
     access on the server. Files larger than 50 MB are not downloaded inline;
     a descriptive error message is returned instead.
 
+    With ``target_dir`` the attachment is written to a file instead, with no
+    size limit, and only its path and size are returned. Prefer it for logs,
+    archives, videos and other large files.
+
     Args:
         ctx: The FastMCP context.
         attachment_id: The ID of the attachment.
+        target_dir: Directory to save the attachment to.
 
     Returns:
         An EmbeddedResource with base64-encoded content, or a TextContent
-        with an error or size-exceeded message.
+        with an error or size-exceeded message; with ``target_dir``, a
+        TextContent with the path of the saved file.
     """
 
     confluence_fetcher = await get_confluence_fetcher(ctx)
@@ -2396,6 +2416,33 @@ async def download_attachment(
             or "application/octet-stream"
         )
         file_size = attachment_data.get("extensions", {}).get("fileSize")
+
+        if target_dir:
+            target_path = Path(target_dir)
+            if not target_path.is_absolute():
+                target_path = get_file_root() / target_path
+            target_path = target_path / Path(filename).name
+
+            saved = await run_fetcher_call(
+                confluence_fetcher.download_attachment, download_url, str(target_path)
+            )
+            result: dict[str, Any] = {
+                "success": saved,
+                "attachment_id": attachment_id,
+                "filename": filename,
+            }
+            if saved:
+                result["path"] = str(target_path)
+                result["size"] = target_path.stat().st_size
+            else:
+                result["error"] = (
+                    f"Failed to save attachment '{filename}' to {target_path}; "
+                    "the server log has the reason"
+                )
+            return TextContent(
+                type="text",
+                text=json.dumps(result, indent=2, ensure_ascii=False),
+            )
 
         if file_size is not None and file_size > ATTACHMENT_MAX_BYTES:
             return TextContent(
@@ -2510,6 +2557,13 @@ async def download_content_attachments(
             )
         ),
     ],
+    target_dir: Annotated[
+        str | None,
+        Field(
+            description=TARGET_DIR_DESCRIPTION,
+            default=None,
+        ),
+    ] = None,
 ) -> list[TextContent | EmbeddedResource]:
     """Download all attachments for a Confluence content item as embedded resources.
 
@@ -2518,16 +2572,34 @@ async def download_content_attachments(
     access on the server. Files larger than 50 MB are skipped with an error
     entry in the summary.
 
+    With ``target_dir`` the attachments are written to files instead, with
+    no size limit, and only their paths and sizes are returned. Prefer it
+    for logs, archives, videos and other large files.
+
     Args:
         ctx: The FastMCP context.
         content_id: The ID of the content.
+        target_dir: Directory to save the attachments to.
 
     Returns:
         A list with a text summary followed by one EmbeddedResource per
-        successfully downloaded attachment.
+        successfully downloaded attachment; with ``target_dir``, only the
+        summary listing the saved files.
     """
 
     confluence_fetcher = await get_confluence_fetcher(ctx)
+
+    if target_dir:
+        saved = await run_fetcher_call(
+            confluence_fetcher.download_content_attachments, content_id, target_dir
+        )
+        return [
+            TextContent(
+                type="text",
+                text=json.dumps(saved, indent=2, ensure_ascii=False),
+            )
+        ]
+
     contents: list[TextContent | EmbeddedResource] = []
 
     attachments_result = await run_fetcher_call(

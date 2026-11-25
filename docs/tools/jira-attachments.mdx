@@ -12,6 +12,7 @@ Download attachments from a Jira issue.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `issue_key` | `string` | Yes | Jira issue key (e.g., 'PROJ-123', 'ACV2-642') |
+| `target_dir` | `string` | No | Directory to save the downloaded files to instead of returning their content. Relative paths resolve against the server's file root (MCP_ATLASSIAN_FILES_DIR, or the working directory when unset); absolute paths must lie inside it. |
 **Example:**
 
 ```json

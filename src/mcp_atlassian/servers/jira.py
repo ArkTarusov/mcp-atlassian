@@ -1468,6 +1468,18 @@ async def download_attachments(
             pattern=ISSUE_KEY_PATTERN,
         ),
     ],
+    target_dir: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Directory to save the downloaded files to instead of "
+                "returning their content. Relative paths resolve against the "
+                "server's file root (MCP_ATLASSIAN_FILES_DIR, or the working "
+                "directory when unset); absolute paths must lie inside it."
+            ),
+            default=None,
+        ),
+    ] = None,
 ) -> list[TextContent | EmbeddedResource]:
     """Download attachments from a Jira issue.
 
@@ -1479,16 +1491,36 @@ async def download_attachments(
     forward ``EmbeddedResource`` blobs for recognized image MIME types and
     otherwise drop the attachment (#1419).
 
+    With ``target_dir`` the attachments are written to files instead, with
+    no size limit, and only their paths and sizes are returned. Prefer it
+    for logs, archives, videos and other large files.
+
     Args:
         ctx: The FastMCP context.
         issue_key: Jira issue key.
+        target_dir: Directory to save the attachments to.
 
     Returns:
         A list containing a text summary, one EmbeddedResource per
         downloaded image attachment, and one TextContent (base64 payload)
-        per downloaded non-image attachment.
+        per downloaded non-image attachment; with ``target_dir``, only the
+        summary listing the saved files.
     """
     jira = await get_jira_fetcher(ctx)
+
+    if target_dir:
+        saved = await run_fetcher_call(
+            jira.download_issue_attachments,
+            issue_key=issue_key,
+            target_dir=target_dir,
+        )
+        return [
+            TextContent(
+                type="text",
+                text=json.dumps(saved, indent=2, ensure_ascii=False),
+            )
+        ]
+
     result = await run_fetcher_call(
         jira.get_issue_attachment_contents, issue_key=issue_key
     )
