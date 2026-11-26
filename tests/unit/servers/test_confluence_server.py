@@ -1966,6 +1966,35 @@ async def test_download_content_attachments_to_target_dir(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        (
+            "confluence_download_attachment",
+            {"attachment_id": "att123456789", "target_dir": "attachments"},
+        ),
+        (
+            "confluence_download_content_attachments",
+            {"content_id": "123", "target_dir": "123"},
+        ),
+    ],
+)
+async def test_download_to_target_dir_refused_on_remote_transport(
+    client, mock_confluence_fetcher, tool, arguments
+):
+    """On a remote transport the files would stay on the server, so it refuses."""
+    from mcp_atlassian.utils import io as io_mod
+
+    io_mod.set_remote_transport(True)
+
+    with pytest.raises(ToolError, match="remote transport"):
+        await client.call_tool(tool, arguments)
+
+    mock_confluence_fetcher.download_attachment.assert_not_called()
+    mock_confluence_fetcher.download_content_attachments.assert_not_called()
+
+
+@pytest.mark.anyio
 async def test_get_page_images_fetch_failure(client, mock_confluence_fetcher):
     """Test graceful handling when fetch_attachment_content returns None."""
     mock_confluence_fetcher.get_content_attachments.return_value = {

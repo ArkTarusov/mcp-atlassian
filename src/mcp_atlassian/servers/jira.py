@@ -23,6 +23,7 @@ from mcp_atlassian.servers.helpers import resolve_transition
 from mcp_atlassian.servers.scope_guard import JIRA_SCOPE_POLICY, ToolScopeGuard
 from mcp_atlassian.utils.decorators import check_write_access
 from mcp_atlassian.utils.env import get_regex_env
+from mcp_atlassian.utils.io import check_file_download_allowed
 from mcp_atlassian.utils.media import (
     ATTACHMENT_MAX_BYTES,
     AttachmentBudget,
@@ -1475,7 +1476,9 @@ async def download_attachments(
                 "Directory to save the downloaded files to instead of "
                 "returning their content. Relative paths resolve against the "
                 "server's file root (MCP_ATLASSIAN_FILES_DIR, or the working "
-                "directory when unset); absolute paths must lie inside it."
+                "directory when unset); absolute paths must lie inside it. "
+                "Refused on remote transports (sse, streamable-http), where "
+                "the files would stay on the server's disk."
             ),
             default=None,
         ),
@@ -1509,6 +1512,7 @@ async def download_attachments(
     jira = await get_jira_fetcher(ctx)
 
     if target_dir:
+        check_file_download_allowed()
         saved = await run_fetcher_call(
             jira.download_issue_attachments,
             issue_key=issue_key,

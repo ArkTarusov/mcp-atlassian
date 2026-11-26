@@ -3588,6 +3588,24 @@ async def test_download_attachments_to_target_dir(jira_client, mock_jira_fetcher
     mock_jira_fetcher.get_issue_attachment_contents.assert_not_called()
 
 
+@pytest.mark.anyio
+async def test_download_attachments_to_target_dir_refused_on_remote_transport(
+    jira_client, mock_jira_fetcher
+):
+    """On a remote transport the files would stay on the server, so it refuses."""
+    from mcp_atlassian.utils import io as io_mod
+
+    io_mod.set_remote_transport(True)
+
+    with pytest.raises(ToolError, match="remote transport"):
+        await jira_client.call_tool(
+            "jira_download_attachments",
+            {"issue_key": "TEST-123", "target_dir": "TEST-123"},
+        )
+
+    mock_jira_fetcher.download_issue_attachments.assert_not_called()
+
+
 # ── jira_get_issue_images tests ──────────────────────────────────────
 
 

@@ -28,7 +28,12 @@ from mcp_atlassian.servers.scope_guard import CONFLUENCE_SCOPE_POLICY, ToolScope
 from mcp_atlassian.utils.decorators import (
     check_write_access,
 )
-from mcp_atlassian.utils.io import get_file_root, open_confined, validate_safe_path
+from mcp_atlassian.utils.io import (
+    check_file_download_allowed,
+    get_file_root,
+    open_confined,
+    validate_safe_path,
+)
 from mcp_atlassian.utils.media import (
     ATTACHMENT_MAX_BYTES,
     AttachmentBudget,
@@ -50,7 +55,8 @@ TARGET_DIR_DESCRIPTION = (
     "Directory to save the downloaded files to instead of returning their content. "
     "Relative paths resolve against the server's file root "
     "(MCP_ATLASSIAN_FILES_DIR, or the working directory when unset); "
-    "absolute paths must lie inside it."
+    "absolute paths must lie inside it. Refused on remote transports "
+    "(sse, streamable-http), where the files would stay on the server's disk."
 )
 
 
@@ -2378,6 +2384,8 @@ async def download_attachment(
         with an error or size-exceeded message; with ``target_dir``, a
         TextContent with the path of the saved file.
     """
+    if target_dir:
+        check_file_download_allowed()
 
     confluence_fetcher = await get_confluence_fetcher(ctx)
 
@@ -2590,6 +2598,7 @@ async def download_content_attachments(
     confluence_fetcher = await get_confluence_fetcher(ctx)
 
     if target_dir:
+        check_file_download_allowed()
         saved = await run_fetcher_call(
             confluence_fetcher.download_content_attachments, content_id, target_dir
         )

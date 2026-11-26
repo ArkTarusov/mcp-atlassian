@@ -56,6 +56,20 @@ def set_remote_transport(active: bool) -> None:
     _remote_transport_active = active
 
 
+def check_file_download_allowed() -> None:
+    """Refuse to save downloads to files when the server runs on a remote transport.
+
+    Raises:
+        ValueError: If the server runs on a remote (HTTP/SSE) transport.
+    """
+    if _remote_transport_active:
+        raise ValueError(
+            "target_dir saves files on the disk of the machine running the MCP "
+            "server, which a caller of a remote transport (sse, streamable-http) "
+            "cannot read. Omit target_dir to receive the content in the response."
+        )
+
+
 def get_file_root() -> Path:
     """Return the directory that confines server-side file path inputs.
 
